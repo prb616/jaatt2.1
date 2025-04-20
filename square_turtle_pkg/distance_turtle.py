@@ -35,7 +35,7 @@ class DistanceReader:
             # Compute the distance moved since the last position update
             dx = msg.x - self.prev_x
             dy = msg.y - self.prev_y
-            distance = math.sqrt(dx*2 + dy*2)
+            distance = math.sqrt(dx**2 + dy**2)
 
             # Add this distance to the overall total distance
             self.total_distance += distance
