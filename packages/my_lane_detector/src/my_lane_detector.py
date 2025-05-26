@@ -1,82 +1,59 @@
 #!/usr/bin/env python3
 
-import numpy as np
 import cv2
-from cv_bridge import CvBridge
-import rospy
-from sensor_msgs.msg import CompressedImage
+import numpy as np
 
-class LaneDetector:
-    def __init__(self):  # Corrected the constructor name to __init__
-        self.cv_bridge = CvBridge()
+# Load image
+image = cv2.imread('frame.jpeg')
+resized = cv2.resize(image, (640, 480))
 
-        rospy.init_node("my_lane_detector")  # Initialize ROS node
+# 1. Canny Edge Detection with three different thresholds
+def apply_canny(img, low, high):
+    edges = cv2.Canny(img, low, high)
+    return edges
 
-        # Subscribe to the image topic (change topic name accordingly)
-        self.image_sub = rospy.Subscriber('/jaatt/camera_node/image/compressed', CompressedImage, self.image_callback, queue_size=1)
+# 2. Hough Line Transform
+def apply_hough(img, threshold=50, min_line_length=50, max_line_gap=10):
+    lines = cv2.HoughLinesP(img, 1, np.pi / 180, threshold, minLineLength=min_line_length, maxLineGap=max_line_gap)
+    line_img = np.copy(img)
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            cv2.line(line_img, (x1, y1), (x2, y2), 255, 2)
+    return line_img
 
-    def image_callback(self, msg):
-        rospy.loginfo("Image received")
+# 3. Yellow lane detection in RGB and HSV
+def detect_yellow_rgb(img):
+    lower = np.array([200, 200, 0])
+    upper = np.array([255, 255, 150])
+    mask = cv2.inRange(img, lower, upper)
+    return cv2.bitwise_and(img, img, mask=mask)
 
-        # Convert ROS image message to OpenCV image
-        img = self.cv_bridge.compressed_imgmsg_to_cv2(msg, desired_encoding="bgr8")
+def detect_yellow_hsv(img):
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    lower = np.array([20, 100, 100])
+    upper = np.array([30, 255, 255])
+    mask = cv2.inRange(hsv, lower, upper)
+    return cv2.bitwise_and(img, img, mask=mask)
 
-        # Crop the image to focus on the road region (adjust crop coordinates as needed)
-        height, width, _ = img.shape
-        roi_top = int(height * 0.8)
-        roi_bottom = height
-        roi_left = int(width * 0.4)
-        roi_right = int(width * 0.6)
-        cropped_img = img[roi_top:roi_bottom, roi_left:roi_right]
+# 4. Simulate lighting change
+def adjust_brightness(img, factor):
+    return cv2.convertScaleAbs(img, alpha=factor, beta=0)
 
-        # Convert cropped image to HSV color space
-        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+# ---------- Run and Save Outputs ----------
+cv2.imwrite("canny_1.png", apply_canny(resized, 50, 150))
+cv2.imwrite("canny_2.png", apply_canny(resized, 100, 200))
+cv2.imwrite("canny_3.png", apply_canny(resized, 150, 250))
 
-        # Define white and yellow color ranges in HSV
-        white_lower = np.array([0, 0, 200], dtype=np.uint8)
-        white_upper = np.array([180, 30, 255], dtype=np.uint8)
-        yellow_lower = np.array([15, 50, 50], dtype=np.uint8)
-        yellow_upper = np.array([35, 255, 255], dtype=np.uint8)
+canny_output = apply_canny(resized, 100, 200)
+cv2.imwrite("hough_1.png", apply_hough(canny_output, threshold=30))
+cv2.imwrite("hough_2.png", apply_hough(canny_output, threshold=50))
+cv2.imwrite("hough_3.png", apply_hough(canny_output, threshold=80))
 
-        # Create masks for white and yellow color ranges
-        white_mask = cv2.inRange(hsv_img, white_lower, white_upper)
-        yellow_mask = cv2.inRange(hsv_img, yellow_lower, yellow_upper)
+cv2.imwrite("yellow_rgb.png", detect_yellow_rgb(resized))
+cv2.imwrite("yellow_hsv.png", detect_yellow_hsv(resized))
 
-        # Apply Canny edge detection on the grayscale version of the cropped image
-        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray_img, threshold1=50, threshold2=150)
-
-        # Apply Hough transform to detect lines in the white-masked image
-        white_lines = cv2.HoughLinesP(white_mask, rho=1, theta=np.pi/180, threshold=20, minLineLength=20, maxLineGap=10)
-        
-        # Apply Hough transform to detect lines in the yellow-masked image
-        yellow_lines = cv2.HoughLinesP(yellow_mask, rho=1, theta=np.pi/180, threshold=20, minLineLength=20, maxLineGap=10)
-
-        # Draw detected lines on the original cropped image
-        if white_lines is not None:
-            for line in white_lines:
-                x1, y1, x2, y2 = line[0]
-                cv2.line(img, (x1, y1), (x2, y2), (255, 0, 0), 2)
-
-        if yellow_lines is not None:
-            for line in yellow_lines:
-                x1, y1, x2, y2 = line[0]
-                cv2.line(img, (x1, y1), (x2, y2), (0, 255, 255), 2)
-
-        # Display the processed images in separate windows
-        cv2.imshow('crop', cropped_img)
-        cv2.imshow('white', white_mask)
-        cv2.imshow('yellow', yellow_mask)
-        cv2.imshow('orignal image', img)
-        cv2.imshow('edge detection', edges)
-        cv2.waitKey(1)
-
-    def run(self):
-        rospy.spin()  # Spin forever but listen to message callbacks
-
-if __name__ == "__main__":  # Corrected the main function check
-    try:
-        lane_detector_instance = LaneDetector()
-        lane_detector_instance.run()
-    except rospy.ROSInterruptException:
-        pass
+bright = adjust_brightness(resized, 1.5)
+dark = adjust_brightness(resized, 0.5)
+cv2.imwrite("bright_lane.png", detect_yellow_hsv(bright))
+cv2.imwrite("dark_lane.png", detect_yellow_hsv(dark))
