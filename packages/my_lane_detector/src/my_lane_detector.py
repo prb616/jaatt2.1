@@ -1,59 +1,111 @@
-#!/usr/bin/env python3
-
 import cv2
 import numpy as np
+import os
+import sys
 
-# Load image
-image = cv2.imread('frame.jpeg')
-resized = cv2.resize(image, (640, 480))
+# --- Configuration ---
+image_filename = 'frame.jpeg'  # **Ensure this matches your filename**
+image_path = image_filename  # Path to the image
 
-# 1. Canny Edge Detection with three different thresholds
-def apply_canny(img, low, high):
-    edges = cv2.Canny(img, low, high)
-    return edges
+# Canny thresholds for different experiments
+threshold_pairs = [
+    (50, 150),
+    (75, 200),
+    (100, 250)
+]
 
-# 2. Hough Line Transform
-def apply_hough(img, threshold=50, min_line_length=50, max_line_gap=10):
-    lines = cv2.HoughLinesP(img, 1, np.pi / 180, threshold, minLineLength=min_line_length, maxLineGap=max_line_gap)
-    line_img = np.copy(img)
+# Hough Transform parameters
+rho = 1           # Distance resolution in pixels.
+theta = np.pi / 180  # Angle resolution in radians.
+minLineLength = 30  # Minimum line length
+maxLineGap = 10    # Maximum allowed gap between line segments
+
+# HSV color range for yellow lane detection
+lower_yellow_hsv = np.array([15, 80, 80])
+upper_yellow_hsv = np.array([35, 255, 255])
+
+# RGB color range for yellow lane detection
+lower_yellow_rgb = np.array([0, 100, 100])
+upper_yellow_rgb = np.array([100, 255, 255])
+
+# --- Function Definitions ---
+
+# Canny edge detection experiment
+def run_canny_experiment(img, threshold_pairs):
+    for i, (low_threshold, high_threshold) in enumerate(threshold_pairs):
+        edges = cv2.Canny(img, low_threshold, high_threshold)
+        cv2.imshow(f'Canny Edge Detection - Low: {low_threshold}, High: {high_threshold}', edges)
+
+# Hough Transform experiment
+def run_hough_transform(img, edges, minLineLength, maxLineGap, threshold):
+    lines = cv2.HoughLinesP(edges, rho, theta, threshold, minLineLength=minLineLength, maxLineGap=maxLineGap)
+    line_img = np.copy(img) * 0  # Blank image for drawing lines
     if lines is not None:
         for line in lines:
             x1, y1, x2, y2 = line[0]
-            cv2.line(line_img, (x1, y1), (x2, y2), 255, 2)
-    return line_img
+            cv2.line(line_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    combined_img = cv2.addWeighted(img, 0.8, line_img, 1, 0)
+    cv2.imshow(f'Hough Transform (Threshold: {threshold})', combined_img)
 
-# 3. Yellow lane detection in RGB and HSV
-def detect_yellow_rgb(img):
-    lower = np.array([200, 200, 0])
-    upper = np.array([255, 255, 150])
-    mask = cv2.inRange(img, lower, upper)
-    return cv2.bitwise_and(img, img, mask=mask)
+# Compare HSV and RGB for yellow detection
+def compare_hsv_rgb(img):
+    # Convert image to HSV and RGB
+    hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-def detect_yellow_hsv(img):
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    lower = np.array([20, 100, 100])
-    upper = np.array([30, 255, 255])
-    mask = cv2.inRange(hsv, lower, upper)
-    return cv2.bitwise_and(img, img, mask=mask)
+    # Apply yellow detection in HSV
+    yellow_mask_hsv = cv2.inRange(hsv_img, lower_yellow_hsv, upper_yellow_hsv)
+    yellow_filtered_color_hsv = cv2.bitwise_and(img, img, mask=yellow_mask_hsv)
 
-# 4. Simulate lighting change
-def adjust_brightness(img, factor):
-    return cv2.convertScaleAbs(img, alpha=factor, beta=0)
+    # Apply yellow detection in RGB
+    yellow_mask_rgb = cv2.inRange(rgb_img, lower_yellow_rgb, upper_yellow_rgb)
+    yellow_filtered_color_rgb = cv2.bitwise_and(img, img, mask=yellow_mask_rgb)
 
-# ---------- Run and Save Outputs ----------
-cv2.imwrite("canny_1.png", apply_canny(resized, 50, 150))
-cv2.imwrite("canny_2.png", apply_canny(resized, 100, 200))
-cv2.imwrite("canny_3.png", apply_canny(resized, 150, 250))
+    # Display results
+    cv2.imshow('Yellow Detection (HSV)', yellow_filtered_color_hsv)
+    cv2.imshow('Yellow Detection (RGB)', yellow_filtered_color_rgb)
 
-canny_output = apply_canny(resized, 100, 200)
-cv2.imwrite("hough_1.png", apply_hough(canny_output, threshold=30))
-cv2.imwrite("hough_2.png", apply_hough(canny_output, threshold=50))
-cv2.imwrite("hough_3.png", apply_hough(canny_output, threshold=80))
+# Simulate lighting conditions (brightness and darkness)
+def simulate_lighting_conditions(img):
+    # Simulate brighter and darker images
+    alpha_bright = 1.5  # Brightness factor
+    beta_bright = 50    # Brightness offset
+    alpha_dark = 0.6    # Darker factor
+    beta_dark = 0       # Darker offset
 
-cv2.imwrite("yellow_rgb.png", detect_yellow_rgb(resized))
-cv2.imwrite("yellow_hsv.png", detect_yellow_hsv(resized))
+    img_bright = cv2.convertScaleAbs(img, alpha=alpha_bright, beta=beta_bright)
+    img_dark = cv2.convertScaleAbs(img, alpha=alpha_dark, beta=beta_dark)
 
-bright = adjust_brightness(resized, 1.5)
-dark = adjust_brightness(resized, 0.5)
-cv2.imwrite("bright_lane.png", detect_yellow_hsv(bright))
-cv2.imwrite("dark_lane.png", detect_yellow_hsv(dark))
+    # Show the simulated lighting conditions
+    cv2.imshow('Brighter Image', img_bright)
+    cv2.imshow('Darker Image', img_dark)
+
+# --- Main Execution ---
+
+if __name__ == "__main__":
+    # Load the original image
+    img = cv2.imread(image_path)
+    if img is None:
+        print(f"Error: Could not load image from {image_path}")
+        sys.exit(1)
+    print(f"Successfully loaded image: {image_path}")
+
+    # Convert image to grayscale for edge detection experiments
+    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Experiment 1: Run Canny Edge Detection with three different threshold pairs
+    run_canny_experiment(gray_img, threshold_pairs)
+
+    # Experiment 2: Apply Hough Transform with varying threshold and observe effect
+    for threshold in [50, 100, 150]:  # Varying the Hough Transform threshold
+        run_hough_transform(img, gray_img, minLineLength, maxLineGap, threshold)
+
+    # Experiment 3: Compare HSV vs RGB for yellow lane detection
+    compare_hsv_rgb(img)
+
+    # Experiment 4: Simulate different lighting conditions
+    simulate_lighting_conditions(img)
+
+    print("Experiments completed. Press any key on one of the image windows to close them.")
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
